@@ -200,9 +200,10 @@
         </summary>
         <div class="px-5 pb-5 border-t border-white/10 pt-4">
           <p class="text-xs text-white/40 mb-3">
-            Get a free API key at
+            For local development, add your key to <code class="text-white/50">.env</code> and run
+            <code class="text-white/50">python3 scripts/load_env.py</code> (see README). Or paste a key here — stored in your browser only.
+            Get a free key at
             <a href="https://openweathermap.org/api" target="_blank" rel="noopener" class="text-sky-400 hover:text-sky-300 underline">openweathermap.org</a>.
-            Your key is stored locally in your browser only.
           </p>
           <div class="flex flex-col sm:flex-row gap-2">
             <input
@@ -228,13 +229,11 @@
     </div>
   </div>
 
+  <script src="/config.local.js"></script>
   <script>
     // ─── Configuration ───────────────────────────────────────────────
     const API_KEY_STORAGE = 'owm_api_key';
     const DEFAULT_CITY = 'San Francisco';
-
-    // Replace with your key here, or use the settings panel / localStorage
-    const HARDCODED_API_KEY = '';
 
     const DEMO_DATA = {
       city: 'San Francisco',
@@ -277,7 +276,10 @@
     }
 
     function getApiKey() {
-      return HARDCODED_API_KEY || localStorage.getItem(API_KEY_STORAGE) || '';
+      if (typeof window.__OWM_API_KEY__ === 'string' && window.__OWM_API_KEY__) {
+        return window.__OWM_API_KEY__;
+      }
+      return localStorage.getItem(API_KEY_STORAGE) || '';
     }
 
     // ─── DOM refs ──────────────────────────────────────────────────────
