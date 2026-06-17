@@ -88,7 +88,13 @@
               Weather <span class="text-transparent bg-clip-text bg-gradient-to-r from-sky-300 to-cyan-200">Dashboard</span>
             </h1>
           </div>
-          <p id="last-updated" class="text-white/40 text-sm"></p>
+          <div class="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+            <div id="unit-toggle" class="glass inline-flex items-center rounded-xl p-1 self-center sm:self-auto" role="group" aria-label="Temperature unit">
+              <button type="button" id="unit-celsius" class="unit-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors" aria-pressed="true">°C</button>
+              <button type="button" id="unit-fahrenheit" class="unit-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors" aria-pressed="false">°F</button>
+            </div>
+            <p id="last-updated" class="text-white/40 text-sm"></p>
+          </div>
         </div>
       </header>
 
@@ -145,8 +151,8 @@
             <div id="weather-icon" class="animate-float text-7xl sm:text-8xl leading-none select-none">☀️</div>
             <div>
               <div class="flex items-baseline gap-2 mb-1">
-                <span id="temperature" class="text-6xl sm:text-7xl font-light tracking-tighter">72°</span>
-                <span class="text-white/50 text-2xl font-light">C</span>
+                <span id="temperature" class="text-6xl sm:text-7xl font-light tracking-tighter">22°</span>
+                <span id="temp-unit" class="text-white/50 text-2xl font-light">C</span>
               </div>
               <p id="condition" class="text-xl text-white/80 font-medium">Partly Cloudy</p>
               <p id="location" class="text-white/50 mt-1 flex items-center gap-1.5">
@@ -233,7 +239,11 @@
   <script>
     // ─── Configuration ───────────────────────────────────────────────
     const API_KEY_STORAGE = 'owm_api_key';
+    const UNIT_STORAGE = 'temp_unit';
     const DEFAULT_CITY = 'San Francisco';
+
+    let tempUnit = localStorage.getItem(UNIT_STORAGE) || 'celsius';
+    let weatherState = null;
 
     const DEMO_DATA = {
       city: 'San Francisco',
@@ -282,6 +292,41 @@
       return localStorage.getItem(API_KEY_STORAGE) || '';
     }
 
+    function cToF(c) {
+      return (c * 9) / 5 + 32;
+    }
+
+    function formatTemp(celsius) {
+      const value = tempUnit === 'fahrenheit' ? cToF(celsius) : celsius;
+      return Math.round(value);
+    }
+
+    function unitLabel() {
+      return tempUnit === 'fahrenheit' ? 'F' : 'C';
+    }
+
+    function setTempUnit(unit) {
+      tempUnit = unit;
+      localStorage.setItem(UNIT_STORAGE, unit);
+      updateUnitToggleUI();
+      if (weatherState) {
+        renderCurrent(weatherState.current);
+        renderForecast(weatherState.forecast);
+      }
+    }
+
+    function updateUnitToggleUI() {
+      const isCelsius = tempUnit === 'celsius';
+      els.unitCelsius.classList.toggle('bg-sky-500', isCelsius);
+      els.unitCelsius.classList.toggle('text-white', isCelsius);
+      els.unitCelsius.classList.toggle('text-white/50', !isCelsius);
+      els.unitCelsius.setAttribute('aria-pressed', isCelsius);
+      els.unitFahrenheit.classList.toggle('bg-sky-500', !isCelsius);
+      els.unitFahrenheit.classList.toggle('text-white', !isCelsius);
+      els.unitFahrenheit.classList.toggle('text-white/50', isCelsius);
+      els.unitFahrenheit.setAttribute('aria-pressed', !isCelsius);
+    }
+
     // ─── DOM refs ──────────────────────────────────────────────────────
     const els = {
       form: document.getElementById('search-form'),
@@ -292,6 +337,9 @@
       errorMessage: document.getElementById('error-message'),
       apiNotice: document.getElementById('api-notice'),
       lastUpdated: document.getElementById('last-updated'),
+      tempUnit: document.getElementById('temp-unit'),
+      unitCelsius: document.getElementById('unit-celsius'),
+      unitFahrenheit: document.getElementById('unit-fahrenheit'),
       temperature: document.getElementById('temperature'),
       condition: document.getElementById('condition'),
       location: document.getElementById('location'),
@@ -328,7 +376,8 @@
     }
 
     function renderCurrent(data) {
-      els.temperature.textContent = `${Math.round(data.temp)}°`;
+      els.temperature.textContent = `${formatTemp(data.temp)}°`;
+      els.tempUnit.textContent = unitLabel();
       els.condition.textContent = data.condition;
       els.location.innerHTML = `
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -338,7 +387,7 @@
         ${data.city}${data.country ? `, ${data.country}` : ''}`;
       els.weatherIcon.textContent = data.icon;
       els.humidity.innerHTML = `${data.humidity}<span class="text-base font-normal text-white/60">%</span>`;
-      els.feelsLike.textContent = `${Math.round(data.feelsLike)}°`;
+      els.feelsLike.textContent = `${formatTemp(data.feelsLike)}°`;
       els.wind.innerHTML = `${Math.round(data.wind)}<span class="text-base font-normal text-white/60"> km/h</span>`;
       els.pressure.innerHTML = `${data.pressure}<span class="text-base font-normal text-white/60"> hPa</span>`;
     }
@@ -351,18 +400,23 @@
           <div class="text-4xl mb-3 select-none">${day.icon}</div>
           <p class="text-xs text-white/40 mb-2 truncate">${day.condition}</p>
           <div class="flex items-center justify-center gap-2 text-sm">
-            <span class="font-semibold">${Math.round(day.high)}°</span>
+            <span class="font-semibold">${formatTemp(day.high)}°</span>
             <span class="text-white/30">/</span>
-            <span class="text-white/50">${Math.round(day.low)}°</span>
+            <span class="text-white/50">${formatTemp(day.low)}°</span>
           </div>
         </div>
       `).join('');
     }
 
+    function renderWeather(current, forecast) {
+      weatherState = { current, forecast };
+      renderCurrent(current);
+      renderForecast(forecast);
+    }
+
     function renderDemo(showNotice = true) {
       showLoading(false);
-      renderCurrent(DEMO_DATA);
-      renderForecast(DEMO_DATA.forecast);
+      renderWeather(DEMO_DATA, DEMO_DATA.forecast);
       els.apiNotice.classList.toggle('hidden', !showNotice);
       setLastUpdated(true);
     }
@@ -437,8 +491,7 @@
             };
           });
 
-        renderCurrent(currentData);
-        renderForecast(forecast.length ? forecast : DEMO_DATA.forecast);
+        renderWeather(currentData, forecast.length ? forecast : DEMO_DATA.forecast);
         setLastUpdated(false);
       } catch (err) {
         showError(err.message || 'Something went wrong. Please try again.');
@@ -477,9 +530,13 @@
       }
     });
 
+    els.unitCelsius.addEventListener('click', () => setTempUnit('celsius'));
+    els.unitFahrenheit.addEventListener('click', () => setTempUnit('fahrenheit'));
+
     // ─── Init ──────────────────────────────────────────────────────────
     (function init() {
       updateDemoDayLabels();
+      updateUnitToggleUI();
       els.input.value = DEFAULT_CITY;
       const savedKey = localStorage.getItem(API_KEY_STORAGE);
       if (savedKey) {
