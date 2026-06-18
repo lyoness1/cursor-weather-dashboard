@@ -62,6 +62,17 @@
       transform: translateY(-4px);
       background: rgba(255, 255, 255, 0.14);
     }
+    .hourly-scroll {
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+    }
+    .hourly-scroll::-webkit-scrollbar {
+      height: 6px;
+    }
+    .hourly-scroll::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 9999px;
+    }
     .bg-orb {
       position: fixed;
       border-radius: 50%;
@@ -186,6 +197,23 @@
         </div>
       </section>
 
+      <!-- Next 24 hours timeline -->
+      <section class="glass-strong rounded-3xl p-6 sm:p-8 mb-8 animate-slide-up" style="animation-delay: 0.25s">
+        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-6">
+          <div>
+            <h2 class="text-lg font-semibold text-white/80 flex items-center gap-2">
+              <svg class="w-5 h-5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+              Next 24 Hours
+            </h2>
+            <p class="text-xs text-white/35 mt-1">Now + 7 steps · 3 hours apart</p>
+          </div>
+          <div id="hourly-range" class="flex gap-5 text-sm shrink-0"></div>
+        </div>
+        <div id="hourly-widget"></div>
+      </section>
+
       <!-- 5-day forecast -->
       <section class="animate-slide-up" style="animation-delay: 0.3s">
         <h2 class="text-lg font-semibold text-white/70 mb-4 flex items-center gap-2">
@@ -262,6 +290,7 @@
         { day: 'Thu', icon: '☁️', high: 19, low: 14, condition: 'Cloudy' },
         { day: 'Fri', icon: '🌤️', high: 21, low: 15, condition: 'Mostly Sunny' },
       ],
+      hourly: [],
     };
 
     // ─── Weather icon mapping ──────────────────────────────────────────
@@ -311,6 +340,7 @@
       updateUnitToggleUI();
       if (weatherState) {
         renderCurrent(weatherState.current);
+        renderHourly(weatherState.hourly);
         renderForecast(weatherState.forecast);
       }
     }
@@ -348,6 +378,8 @@
       feelsLike: document.getElementById('feels-like'),
       wind: document.getElementById('wind'),
       pressure: document.getElementById('pressure'),
+      hourlyWidget: document.getElementById('hourly-widget'),
+      hourlyRange: document.getElementById('hourly-range'),
       forecastGrid: document.getElementById('forecast-grid'),
       apiKeyInput: document.getElementById('api-key-input'),
       saveApiKey: document.getElementById('save-api-key'),
@@ -392,6 +424,136 @@
       els.pressure.innerHTML = `${data.pressure}<span class="text-base font-normal text-white/60"> hPa</span>`;
     }
 
+    function formatHourLabel(hour24) {
+      const period = hour24 >= 12 ? 'PM' : 'AM';
+      const hour12 = hour24 % 12 || 12;
+      return `${hour12} ${period}`;
+    }
+
+    function cityLocalParts(unixUtc, tzOffsetSec) {
+      const d = new Date((unixUtc + tzOffsetSec) * 1000);
+      return {
+        dateKey: `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`,
+        hour: d.getUTCHours(),
+      };
+    }
+
+    function parseNext24Hours(list, timezone, current) {
+      const nowUtc = Math.floor(Date.now() / 1000);
+      const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const nowParts = cityLocalParts(nowUtc, timezone);
+
+      const hourly = [{
+        label: 'Now',
+        temp: current.temp,
+        icon: current.icon,
+      }];
+
+      list
+        .filter((entry) => entry.dt > nowUtc)
+        .slice(0, 7)
+        .forEach((entry) => {
+          const parts = cityLocalParts(entry.dt, timezone);
+          let label = formatHourLabel(parts.hour);
+          if (parts.dateKey !== nowParts.dateKey) {
+            const d = new Date((entry.dt + timezone) * 1000);
+            label = `${dayNames[d.getUTCDay()]} ${label}`;
+          }
+          hourly.push({
+            label,
+            temp: entry.main.temp,
+            icon: iconFromCode(entry.weather[0].icon),
+          });
+        });
+
+      return hourly;
+    }
+
+    function buildDemoNext24() {
+      const icons = ['⛅', '☀️', '☀️', '🌤️', '⛅', '☁️', '🌦️'];
+      const temps = [22, 23, 24, 24, 23, 21, 20];
+      const now = new Date();
+      let hour = now.getHours();
+
+      return [
+        { label: 'Now', temp: 22, icon: '⛅' },
+        ...Array.from({ length: 7 }, (_, i) => {
+          hour = (hour + 3) % 24;
+          return {
+            label: formatHourLabel(hour),
+            temp: temps[i],
+            icon: icons[i],
+          };
+        }),
+      ];
+    }
+
+    function renderHourly(hourly) {
+      if (!hourly.length) {
+        els.hourlyRange.innerHTML = '';
+        els.hourlyWidget.innerHTML = `
+          <p class="text-center text-white/40 text-sm py-8">Forecast unavailable.</p>`;
+        return;
+      }
+
+      const displayTemps = hourly.map((slot) => formatTemp(slot.temp));
+      const minT = Math.min(...displayTemps);
+      const maxT = Math.max(...displayTemps);
+      const range = maxT - minT || 1;
+      const count = hourly.length;
+      const chartHeight = 72;
+      const chartWidth = 100;
+
+      els.hourlyRange.innerHTML = `
+        <div><span class="text-white/40">High </span><span class="font-semibold text-sky-200">${maxT}°</span></div>
+        <div><span class="text-white/40">Low </span><span class="font-semibold text-white/70">${minT}°</span></div>
+      `;
+
+      const points = hourly.map((slot, i) => {
+        const x = count === 1 ? chartWidth / 2 : (i / (count - 1)) * chartWidth;
+        const y = chartHeight - ((displayTemps[i] - minT) / range) * (chartHeight - 16) - 8;
+        return { x, y, slot, temp: displayTemps[i] };
+      });
+
+      const line = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
+      const area = `${line} L ${points[points.length - 1].x.toFixed(1)} ${chartHeight} L ${points[0].x.toFixed(1)} ${chartHeight} Z`;
+
+      els.hourlyWidget.innerHTML = `
+        <div class="hourly-scroll overflow-x-auto pb-1">
+          <div class="min-w-[36rem]">
+            <div class="relative h-28 mb-1">
+              <svg viewBox="0 0 ${chartWidth} ${chartHeight}" preserveAspectRatio="none" class="absolute inset-0 w-full h-full text-sky-400">
+                <defs>
+                  <linearGradient id="timelineFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="currentColor" stop-opacity="0.3"/>
+                    <stop offset="100%" stop-color="currentColor" stop-opacity="0"/>
+                  </linearGradient>
+                </defs>
+                <path d="${area}" fill="url(#timelineFill)"/>
+                <path d="${line}" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+                ${points.map((p) => `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2.2" fill="#bae6fd"/>`).join('')}
+              </svg>
+              <div class="absolute inset-0 grid" style="grid-template-columns: repeat(${count}, minmax(0, 1fr))">
+                ${points.map((p) => `
+                  <div class="flex justify-center">
+                    <span class="text-xs font-semibold text-sky-100" style="margin-top: ${Math.max(0, (p.y / chartHeight) * 100 - 18)}%">${p.temp}°</span>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+            <div class="grid border-t border-white/10 pt-4" style="grid-template-columns: repeat(${count}, minmax(0, 1fr))">
+              ${hourly.map((slot) => `
+                <div class="text-center px-1">
+                  <p class="text-[10px] sm:text-xs text-white/45 font-medium mb-2 truncate" title="${slot.label}">${slot.label}</p>
+                  <div class="text-xl sm:text-2xl leading-none">${slot.icon}</div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
     function renderForecast(forecast) {
       els.forecastGrid.innerHTML = forecast.map((day, i) => `
         <div class="forecast-card glass rounded-2xl p-4 sm:p-5 text-center transition-all duration-300 cursor-default"
@@ -408,15 +570,16 @@
       `).join('');
     }
 
-    function renderWeather(current, forecast) {
-      weatherState = { current, forecast };
+    function renderWeather(current, forecast, hourly) {
+      weatherState = { current, forecast, hourly };
       renderCurrent(current);
+      renderHourly(hourly);
       renderForecast(forecast);
     }
 
     function renderDemo(showNotice = true) {
       showLoading(false);
-      renderWeather(DEMO_DATA, DEMO_DATA.forecast);
+      renderWeather(DEMO_DATA, DEMO_DATA.forecast, DEMO_DATA.hourly);
       els.apiNotice.classList.toggle('hidden', !showNotice);
       setLastUpdated(true);
     }
@@ -491,7 +654,17 @@
             };
           });
 
-        renderWeather(currentData, forecast.length ? forecast : DEMO_DATA.forecast);
+        const hourly = parseNext24Hours(
+          forecastRaw.list,
+          forecastRaw.city.timezone,
+          currentData
+        );
+
+        renderWeather(
+          currentData,
+          forecast.length ? forecast : DEMO_DATA.forecast,
+          hourly.length ? hourly : DEMO_DATA.hourly
+        );
         setLastUpdated(false);
       } catch (err) {
         showError(err.message || 'Something went wrong. Please try again.');
@@ -509,6 +682,7 @@
         ...day,
         day: dayNames[(today + 1 + i) % 7],
       }));
+      DEMO_DATA.hourly = buildDemoNext24();
     }
 
     // ─── Events ────────────────────────────────────────────────────────
