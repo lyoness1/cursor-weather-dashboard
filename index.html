@@ -321,6 +321,61 @@
       return localStorage.getItem(API_KEY_STORAGE) || '';
     }
 
+    function weatherQueryParam(location) {
+      if (typeof location === 'string') {
+        return `q=${encodeURIComponent(location)}`;
+      }
+      return `lat=${location.lat}&lon=${location.lon}`;
+    }
+
+    async function fetchLocationByIp() {
+      const res = await fetch('https://ipwho.is/');
+      if (!res.ok) {
+        throw new Error('Could not detect your location');
+      }
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.message || 'Could not detect your location');
+      }
+      return {
+        city: data.city,
+        country: data.country_code,
+        lat: data.latitude,
+        lon: data.longitude,
+        source: 'ip',
+      };
+    }
+
+    function fetchBrowserLocation() {
+      return new Promise((resolve, reject) => {
+        if (!navigator.geolocation) {
+          reject(new Error('Geolocation not supported'));
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(
+          (pos) => resolve({
+            lat: pos.coords.latitude,
+            lon: pos.coords.longitude,
+            source: 'gps',
+          }),
+          () => reject(new Error('Geolocation unavailable')),
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 300000 }
+        );
+      });
+    }
+
+    async function resolveDefaultLocation() {
+      try {
+        return await fetchBrowserLocation();
+      } catch {
+        try {
+          return await fetchLocationByIp();
+        } catch {
+          return { city: DEFAULT_CITY, source: 'default' };
+        }
+      }
+    }
+
     function cToF(c) {
       return (c * 9) / 5 + 32;
     }
@@ -577,18 +632,26 @@
       renderForecast(forecast);
     }
 
-    function renderDemo(showNotice = true) {
+    function renderDemo(showNotice = true, location = null) {
       showLoading(false);
+      if (location?.city) {
+        DEMO_DATA.city = location.city;
+        DEMO_DATA.country = location.country || DEMO_DATA.country;
+      }
       renderWeather(DEMO_DATA, DEMO_DATA.forecast, DEMO_DATA.hourly);
       els.apiNotice.classList.toggle('hidden', !showNotice);
       setLastUpdated(true);
     }
 
     // ─── OpenWeatherMap API ────────────────────────────────────────────
-    async function fetchWeather(city) {
+    async function fetchWeather(location) {
       const apiKey = getApiKey();
+      const query = weatherQueryParam(
+        typeof location === 'string' ? location : location
+      );
+
       if (!apiKey) {
-        renderDemo();
+        renderDemo(true, typeof location === 'string' ? { city: location } : location);
         return;
       }
 
@@ -598,13 +661,14 @@
 
       try {
         const [currentRes, forecastRes] = await Promise.all([
-          fetch(`https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${apiKey}&units=metric`),
-          fetch(`https://api.openweathermap.org/data/2.5/forecast?q=${encodeURIComponent(city)}&appid=${apiKey}&units=metric`),
+          fetch(`https://api.openweathermap.org/data/2.5/weather?${query}&appid=${apiKey}&units=metric`),
+          fetch(`https://api.openweathermap.org/data/2.5/forecast?${query}&appid=${apiKey}&units=metric`),
         ]);
 
         if (!currentRes.ok) {
           const err = await currentRes.json().catch(() => ({}));
-          throw new Error(err.message || `City "${city}" not found`);
+          const label = typeof location === 'string' ? location : 'your location';
+          throw new Error(err.message || `Weather for "${label}" not found`);
         }
         if (!forecastRes.ok) {
           throw new Error('Failed to load forecast data');
@@ -665,6 +729,7 @@
           forecast.length ? forecast : DEMO_DATA.forecast,
           hourly.length ? hourly : DEMO_DATA.hourly
         );
+        els.input.value = currentData.city;
         setLastUpdated(false);
       } catch (err) {
         showError(err.message || 'Something went wrong. Please try again.');
@@ -708,15 +773,23 @@
     els.unitFahrenheit.addEventListener('click', () => setTempUnit('fahrenheit'));
 
     // ─── Init ──────────────────────────────────────────────────────────
-    (function init() {
+    (async function init() {
       updateDemoDayLabels();
       updateUnitToggleUI();
-      els.input.value = DEFAULT_CITY;
       const savedKey = localStorage.getItem(API_KEY_STORAGE);
       if (savedKey) {
         els.apiKeyInput.placeholder = '•••••••••••••••• (key saved)';
       }
-      fetchWeather(DEFAULT_CITY);
+
+      const location = await resolveDefaultLocation();
+
+      if (location.lat != null && location.lon != null) {
+        els.input.value = 'Detecting location…';
+        await fetchWeather({ lat: location.lat, lon: location.lon });
+      } else {
+        els.input.value = location.city || DEFAULT_CITY;
+        await fetchWeather(location.city || DEFAULT_CITY);
+      }
     })();
   </script>
 </body>
